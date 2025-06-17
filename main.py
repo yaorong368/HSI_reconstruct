@@ -13,8 +13,30 @@ from moduler import *
 
 torch.set_printoptions(sci_mode=False)
 
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, weight=None, reduction='mean'):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.reduction = reduction
 
-def safe_load_numpy(file_path, retries=20, wait=0.1):
+    def forward(self, inputs, targets):
+        """
+        inputs: [B, C, H, W] logits
+        targets: [B, H, W] integer class labels (0 to C-1)
+        """
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.weight, reduction='none')  # [B, H, W]
+        pt = torch.exp(-ce_loss)  # pt: probability of correct class
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+def safe_load_numpy(file_path, retries=100, wait=0.1):
     for attempt in range(retries):
         try:
             data = np.load(file_path)   # Attempt to load
@@ -65,16 +87,23 @@ class get_dataset(Dataset):
         ipt = torch.from_numpy(ipt)
         # ipt,_,_ = ica.pca_whiten(ipt.reshape(100,-1), 10)
         # ipt = torch.from_numpy(ipt.reshape(10,32,32))
-        label_index = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])).long()
-        label = torch.zeros(71)
-        label[label_index] = 1
+
+        tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx]))
+
+        # tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])[None,:])
+        # tgt = (tgt - tgt.mean(axis=(1,2), keepdims=True)) / (tgt.std(axis=(1,2), keepdims=True)+ 1e-8)
+
+
+        # label_index = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])).long()
+        # label = torch.zeros(71)
+        # label[label_index] = 1
 
         # label = torch.tensor([0, 1]).repeat(71, 1)
         # label[label_index] = torch.tensor([1, 0])
 
 
         
-        return ipt.float(), label.float()
+        return ipt.float(), tgt.long()
     
 if __name__ == "__main__":
 #--------set data
@@ -83,12 +112,18 @@ if __name__ == "__main__":
     # data_type = 'Irradiated'
 
     blur_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/blur_cube/'
-    # blur_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/spectral_cube/'
-    label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/label/'
+    label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/spectral_cube/'
+    # label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/label/'
 
     data_file = []
     label_file = []
     # spectral_file = []
+
+    while len(os.listdir(blur_dir))<1000:
+        print('insuffient data:', len(os.listdir(blur_dir)))
+        time.sleep(5)
+
+
     for i in range(len(os.listdir(blur_dir))):
         data_file.append(blur_dir + f"{i}.npy")
         label_file.append(label_dir + f"{i}.npy")
@@ -101,7 +136,7 @@ if __name__ == "__main__":
 
 #----define training pararmeter
     # batch_size = np.random.randint(50,300)
-    batch_size = 100
+    batch_size = 30
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
    
     # model = model = DeepLSTMTemporalEncoder(
@@ -112,27 +147,43 @@ if __name__ == "__main__":
     #     dropout=0.5
     #     ).to(device)
     # model = SpectralCubeNetV2(in_channels=20, num_classes=71).to(device)
-    model = CubeModel(50,71,input_size=16).to(device)
+    # model = CubeModel(50,71,input_size=16).to(device)
+    # model = HSIReconstructor(in_channels=20, num_classes=24).to(device)
+    # model = HSIReconstructor(in_channels=20, num_classes=72).to(device)
+    model = HSIReconstructor(in_channels=30, num_classes=72).to(device)
     
 
     loader = DataLoader(my_dataset, batch_size=batch_size, shuffle=True)
     # criterion = torch.nn.CrossEntropyLoss()
 
-    lb_list = []
-    for file in label_file:
-        label_index = torch.from_numpy(safe_load_numpy(file)).long()
-        label = torch.tensor([0, 1]).repeat(71, 1)
-        label[label_index] = torch.tensor([1, 0])
-        lb_list.append(label.unsqueeze(0))
+    # lb_list = []
+    # for file in label_file:
+    #     label_index = torch.from_numpy(safe_load_numpy(file)).long()
+    #     label = torch.tensor([0, 1]).repeat(71, 1)
+    #     label[label_index] = torch.tensor([1, 0])
+    #     lb_list.append(label.unsqueeze(0))
 
-    criterion = torch.nn.BCEWithLogitsLoss(
-        pos_weight = compute_pos_weight_from_two_hot(torch.cat(lb_list,0)).to(device)
-    )
+    # criterion = torch.nn.BCEWithLogitsLoss(
+    #     pos_weight = compute_pos_weight_from_two_hot(torch.cat(lb_list,0)).to(device)
+    # )
 
-    criterion = nn.BCEWithLogitsLoss()
-    # criterion = torch.nn.BCEWithLogitsLoss(pos_weight = torch.tensor([20.0]).to(device))    
+    # criterion = nn.BCEWithLogitsLoss()
+    # criterion = torch.nn.BCEWithLogitsLoss(pos_weight = torch.tensor([20.0]).to(device))  
+    # criterion = nn.MSELoss()
+      
+    # weights = torch.ones(24)
+    # weights[0] = 0.5
+
+    # # Move to correct device (GPU or CPU)
+    # weights = weights.to(device)
+
+    # # Use with CrossEntropyLoss
+    # criterion = nn.CrossEntropyLoss(weight=weights)
+    criterion = FocalLoss(gamma=2.0)
+
+    # criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-6)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=400, gamma=0.5)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
 
 #----training
@@ -144,7 +195,7 @@ if __name__ == "__main__":
 
     # while True:
     # for i in range(10000):
-    while count_to_stop < 100:
+    while count_to_stop < 200:
         # Training Phase
         model.train()
         running_loss = 0.0
@@ -172,7 +223,7 @@ if __name__ == "__main__":
             # Backward pass and optimization
             loss.backward()
             optimizer.step()
-            scheduler.step()
+            # scheduler.step()
 
             
             running_loss += loss.item()

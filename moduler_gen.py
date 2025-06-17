@@ -90,6 +90,64 @@ def generate_fake_spectra(data_type, material_path, num_spec=50):
 
     return dict(sorted(fake_spectra.items(), key=lambda x: x[0]))
 
+
+# def generate_fake_spectra(data_type, material_path, num_spec=50):
+#     """
+#     Generate fake spectra from Excel files.
+
+#     Args:
+#         data_type: passed into get_material_id(data_type)
+#         num_spec: number of points to select per spectrum (not the interval)
+
+#     Returns:
+#         dict: material index to resampled spectrum
+#     """
+# #     material_path = '/Users/yaorongxiao/Desktop/satellite_project/material_spectral_copy/'
+#     file_names = [f for f in os.listdir(material_path) if f.endswith('.xlsx')]
+
+#     fake_spectra = {}
+#     color_index = 1
+#     material_category=[
+#         'Aluminum 6061',
+#         'Stainless_steel',
+#         'Titanium',
+#         'CMX',
+#         'Kapton HN 1 mil',
+#         'Si solar cell']
+
+#     for file_name in sorted(file_names):  # sort for consistent ordering
+#         file_path = os.path.join(material_path, file_name)
+#         sheet_names = pd.ExcelFile(file_path).sheet_names
+
+#         # Move 'glass'-related sheet names to the front
+#         glass_sheets = [name for name in sheet_names if 'glass' in name.lower()]
+#         other_sheets = [name for name in sheet_names if 'glass' not in name.lower()]
+#         ordered_sheets = glass_sheets + other_sheets
+        
+#         for sheet_name in ordered_sheets:
+            
+#             if sheet_name in material_category:
+#                 df = pd.read_excel(file_path, sheet_name=sheet_name)
+#                 material_id = get_material_id(data_type)
+
+#                 if material_id >= df.shape[1]:
+#     #                 print(f"[WARN] Skipping: '{file_name}' -> '{sheet_name}' (invalid material_id={material_id})")
+#                     continue
+
+#                 values = df.iloc[:, material_id].tolist()[:-2]
+
+#                 if not any(pd.notna(values)):
+#     #                 print(f"[EMPTY] Skipping: '{file_name}' -> '{sheet_name}' (all values empty or NaN)")
+#                     continue
+
+#                 values = list_to_numpy_with_mean(values)
+#                 spectrum = resample_to_fixed_length(values, num_spec)
+
+#                 fake_spectra[color_index] = spectrum
+#                 color_index += 1
+
+#     return dict(sorted(fake_spectra.items(), key=lambda x: x[0]))
+
 def get_intrinsics(fov_y, image_size):
     f = (0.5 * image_size) / np.tan(fov_y / 2)
     cx, cy = image_size / 2, image_size / 2
@@ -109,7 +167,7 @@ def rotate_mesh_vertices(mesh, rotation_matrix):
     mesh_rotated.vertices = rotated_vertices
     return mesh_rotated
 
-def rasterize_components_with_depth(components, image_size=256, camera_h=25, angles=(0, 0, 0)):
+def rasterize_components_with_depth(components, image_size=256, camera_pos=[0,0,25], angles=(0, 0, 0)):
     depth_buffer = np.full((image_size, image_size), np.inf)
     material_mask = np.zeros((image_size, image_size), dtype=np.uint8)
     
@@ -117,7 +175,8 @@ def rasterize_components_with_depth(components, image_size=256, camera_h=25, ang
     rotation_matrix = rotation.as_matrix()
 
     camera_pose = np.eye(4)
-    camera_pose[:3, 3] = [0, 0, camera_h]
+    # camera_pose[:3, 3] = [0, 0, camera_h]
+    camera_pose[:3, 3] = camera_pos
     intrinsics = get_intrinsics(np.radians(60), image_size)
 
     for mesh, material_id in components:
@@ -193,35 +252,55 @@ def create_spectral_cube(image_shape, material_mask, spectra):
 # -------------------- SATELLITE GENERATION ----------------------
 
 def make_satellite_with_ids(color_list, color_to_material):
-#     a, b, c = np.random.choice(np.arange(3, 19), 3, replace=False)
-    color1 = color_list[np.random.randint(0, 45)] #body
-    color2 = color_list[np.random.randint(45, 55)] #antenna
-    
-    color3 = color_list[np.random.randint(55, 65)] #connector
-    color4 = color_list[np.random.randint(65, len(color_list))] #panel
-#     color4 = color_list[0]
-#     color2 = color_list[1]
-#     color3 = color_list[2]
-#     color1 = color_list[3]
-    
-    
+    color1_up = color_list[np.random.randint(0, 15)]
+    color1_mid = color_list[np.random.randint(15, 30)]
+    color1_down = color_list[np.random.randint(30, 45)]
+    color2 = color_list[np.random.randint(45, 60)]  # antenna
+    color3 = color_list[np.random.randint(60, 65)]  # connector
+    color4 = color_list[np.random.randint(65, len(color_list))]  # panel
+    # color1_up = color_list[0]
+    # color1_mid = color_list[1]
+    # color1_down = color_list[2]
+    # color2 = color_list[3]  # antenna
+    # color3 = color_list[4]  # connector
+    # color4 = color_list[5]  # panel
 
-    color1 = color1[:3] + [255]
+    color1_up = color1_up[:3] + [255]
+    color1_mid = color1_mid[:3] + [255]
+    color1_down = color1_down[:3] + [255]
     color2 = color2[:3] + [255]
-    # color3 = color3[:3] + [255]
     color4 = color4[:3] + [255]
 
     components = []
 
-    body = trimesh.creation.cylinder(radius=0.8, height=3.0, sections=20)
-    body.visual.vertex_colors = np.tile(color1, (len(body.vertices), 1))
-    components.append((body, color_to_material[tuple(color1[:3])]))
+    # Body split into up, mid, down
+    h_total = 3.0
+    h_third = h_total / 3.0
 
-    antenna = trimesh.creation.icosphere(subdivisions=2, radius=0.7)
-    antenna.apply_translation([0, 0, 1.5 + 0.8])
+    # Down part
+    body_down = trimesh.creation.cylinder(radius=0.8, height=h_third, sections=20)
+    body_down.apply_translation([0, 0, -h_total / 2 + h_third / 2])
+    body_down.visual.vertex_colors = np.tile(color1_down, (len(body_down.vertices), 1))
+    components.append((body_down, color_to_material[tuple(color1_down[:3])]))
+
+    # Mid part
+    body_mid = trimesh.creation.cylinder(radius=0.8, height=h_third, sections=50)
+    body_mid.visual.vertex_colors = np.tile(color1_mid, (len(body_mid.vertices), 1))
+    components.append((body_mid, color_to_material[tuple(color1_mid[:3])]))
+
+    # Up part
+    body_up = trimesh.creation.cylinder(radius=0.8, height=h_third, sections=20)
+    body_up.apply_translation([0, 0, h_total / 2 - h_third / 2])
+    body_up.visual.vertex_colors = np.tile(color1_up, (len(body_up.vertices), 1))
+    components.append((body_up, color_to_material[tuple(color1_up[:3])]))
+
+    # Antenna
+    antenna = trimesh.creation.icosphere(subdivisions=2, radius=0.4)
+    antenna.apply_translation([0, 0, h_total / 2 + 0.8])
     antenna.visual.vertex_colors = np.tile(color2, (len(antenna.vertices), 1))
     components.append((antenna, color_to_material[tuple(color2[:3])]))
 
+    # Connectors
     connector1 = trimesh.creation.box(extents=[1.0, 0.3, 0.3])
     connector1.apply_translation([0.8 + 0.5, 0, 0])
     connector2 = trimesh.creation.box(extents=[1.0, 0.3, 0.3])
@@ -230,17 +309,20 @@ def make_satellite_with_ids(color_list, color_to_material):
     connectors.visual.vertex_colors = np.tile(color3, (len(connectors.vertices), 1))
     components.append((connectors, color_to_material[tuple(color3[:3])]))
 
-    panel1 = trimesh.creation.box(extents=[3.5, 2.0, 0.01])
-    panel1.apply_translation([3.0, 0, 0])
-    panel2 = trimesh.creation.box(extents=[3.5, 2.0, 0.01])
-    panel2.apply_translation([-3.0, 0, 0])
+    # Panels
+    panel1 = trimesh.creation.box(extents=[3.5, 0.01, 2.0])
+    panel1.apply_translation([4.5, 0, 0])
+    panel2 = trimesh.creation.box(extents=[3.5, 0.01, 2.0])
+    panel2.apply_translation([-4.5, 0, 0])
     solar_panels = trimesh.util.concatenate([panel1, panel2])
     solar_panels.visual.vertex_colors = np.tile(color4, (len(solar_panels.vertices), 1))
     components.append((solar_panels, color_to_material[tuple(color4[:3])]))
 
-    satellite = trimesh.util.concatenate([body, antenna, 
-                                          connectors, 
-                                          solar_panels])
+    # Combine all
+    satellite = trimesh.util.concatenate([
+        body_down, body_mid, body_up,
+        antenna, connectors, solar_panels
+    ])
 
     return satellite, components
 
