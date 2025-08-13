@@ -13,6 +13,26 @@ from moduler import *
 
 torch.set_printoptions(sci_mode=False)
 
+def multiclass_dice_loss(preds, targets, num_classes=72, smooth=1e-5, weight=None):
+    preds = F.softmax(preds, dim=1)              # [B, C, H, W]
+    targets_onehot = F.one_hot(targets, num_classes)  # [B, H, W, C]
+    targets_onehot = targets_onehot.permute(0, 3, 1, 2).float()  # [B, C, H, W]
+
+    intersection = (preds * targets_onehot).sum(dim=(0, 2, 3))  # per class
+    union = preds.sum(dim=(0, 2, 3)) + targets_onehot.sum(dim=(0, 2, 3))
+
+    dice = (2. * intersection + smooth) / (union + smooth)
+
+    if weight is not None:
+        dice = dice * weight.to(dice.device)  # apply per-class weights
+
+    return 1 - dice.mean()
+
+def hybrid_loss(preds, targets, alpha=0.7):
+    dice = multiclass_dice_loss(preds, targets)
+    ce = F.cross_entropy(preds, targets)
+    return alpha * dice + (1 - alpha) * ce
+
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, weight=None, reduction='mean'):
         super().__init__()
@@ -89,6 +109,9 @@ class get_dataset(Dataset):
         # ipt = torch.from_numpy(ipt.reshape(10,32,32))
 
         tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx]))
+        # one_hot = F.one_hot(tgt, num_classes=72)
+        # one_hot = one_hot.permute(0, 3, 1, 2).float()
+
 
         # tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])[None,:])
         # tgt = (tgt - tgt.mean(axis=(1,2), keepdims=True)) / (tgt.std(axis=(1,2), keepdims=True)+ 1e-8)
@@ -150,7 +173,8 @@ if __name__ == "__main__":
     # model = CubeModel(50,71,input_size=16).to(device)
     # model = HSIReconstructor(in_channels=20, num_classes=24).to(device)
     # model = HSIReconstructor(in_channels=20, num_classes=72).to(device)
-    model = HSIReconstructor(in_channels=30, num_classes=72).to(device)
+    # model = HSIReconstructor(in_channels=40, num_classes=72).to(device)
+    model = SpectralSpatialHSIModel(in_channels=50, num_classes=72).to(device)
     
 
     loader = DataLoader(my_dataset, batch_size=batch_size, shuffle=True)
@@ -208,7 +232,8 @@ if __name__ == "__main__":
             
             # Forward pass
             outputs = model(cube)
-            loss = criterion(outputs, labels)
+            # loss = criterion(outputs, labels)
+            loss = hybrid_loss(outputs, labels)
 
             # Encourage at most 3 strong activations
             # prob = torch.sigmoid(outputs)  # [B, 71]
@@ -251,7 +276,9 @@ if __name__ == "__main__":
         plt.savefig('/data/users2/yxiao11/model/satellite_project/resluts_n_model/loss.png')
         if avg_train_loss <= min(my_loss):
             count_to_stop = 0
-            torch.save(model, f"/data/users2/yxiao11/model/satellite_project/resluts_n_model/model.pth")
+            # torch.save(model, f"/data/users2/yxiao11/model/satellite_project/resluts_n_model/model.pth")
+            traced_model = torch.jit.trace(model, cube)
+            traced_model.save("/data/users2/yxiao11/model/satellite_project/resluts_n_model/model.pt")
             print(f"Model saved at iteration {iteration} with loss {avg_train_loss:.6f}")
         
         

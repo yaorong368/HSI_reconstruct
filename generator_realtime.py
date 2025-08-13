@@ -28,10 +28,19 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+    
+def compute_sigma_pixels(wavelength_nm, D_m=3.6, pixel_um=10, focal_length_m=100):
+    wavelength_m = wavelength_nm * 1e-9
+    theta_rad = 0.25 * wavelength_m / D_m
+    theta_arcsec = theta_rad * 206265
+
+    plate_scale = (206265 * pixel_um) / (focal_length_m * 1e6)
+    sigma_pixels = theta_arcsec / plate_scale
+    return sigma_pixels
 
 # -------------------- SAMPLE GENERATION FUNCTION ------------------
 
-def generate_sample(fake_spectra, image_size=256, camera_h=25):
+def generate_sample(fake_spectra, image_size=256, camera_pos=[0,0,20]):
     
     
     
@@ -43,42 +52,61 @@ def generate_sample(fake_spectra, image_size=256, camera_h=25):
     
     _, components = make_satellite_with_ids(color_list, color_to_material)
     
-    angles = np.random.randint(0, 360, 3)
-    material_mask = rasterize_components_with_depth(components, image_size=image_size, camera_h=camera_h, angles=angles)
-    
+    # angles = np.random.randint(0, 360, 3)
+    angles = np.array([90., 0., 0.])
+    # angles = np.array([0., 0., 0.])
+    angles[0] = np.random.uniform(-90,90,1)
+    angles[1] = np.random.uniform(-90,90,1)
+    angles[2] = np.random.uniform(-90,90,1)
+    # angles[0] = np.random.randint(55,125,1)
+    # angles[1] = np.random.randint(-60,60,1)
+    # angles[2] = np.random.randint(-30,30,1)
+    material_mask = rasterize_components_with_depth(
+        components, image_size=image_size, camera_pos=camera_pos, angles=angles)
     
     spectral_cube, labels = create_spectral_cube((image_size, image_size), material_mask, fake_spectra)
-
-    return material_mask, spectral_cube, labels
-
-def simulator(image_size, fake_spectra, camera_h=10):
     
-    material_mask,spectral_cube, labels = generate_sample(
+    zoomed_material_mask = rasterize_components_with_depth(
+        components, image_size=image_size, camera_pos=[0,0,20], angles=angles)
+    
+    # zoomed_spectral_cube, _ = create_spectral_cube((128, 128), zoomed_material_mask, fake_spectra)
+
+    return material_mask,spectral_cube, labels, zoomed_material_mask
+
+def simulator(image_size, fake_spectra, camera_pos=[0,0,30]):
+    
+    material_mask,spectral_cube, labels, zoomed_spectral_cube = generate_sample(
         fake_spectra,
         # material_path = '/data/users2/yxiao11/model/satellite_project/material_spectral',
         image_size=image_size, 
         # data_type=data_type, 
         # num_spec=num_spec, 
-        camera_h=camera_h
+        camera_pos=camera_pos
     )
     #######################
-    # Generate random k and b for each sample
-    k = np.random.uniform(0.7, 1.2)  # Example range for k
-    b = np.random.uniform(1, 2)      # Example range for b
+#     # Generate random k and b for each sample
+#     k = np.random.uniform(0.7, 1.2)  # Example range for k
+#     b = np.random.uniform(1, 3)      # Example range for b
     n_slices = spectral_cube.shape[0]
-    # Compute kernel sizes based on the linear formula
-    kernel_sizes = (k * np.arange(5,n_slices+5)/5.5 + b).astype(int)
-    kernel_sizes[kernel_sizes % 2 == 0] += 1  # Ensure odd kernel sizes
-    #######################
-    # Convert kernel sizes to corresponding sigmas
-    sigmas = kernel_sizes / 2.5  # Adjust this scaling factor as needed   
+#     # Compute kernel sizes based on the linear formula
+#     kernel_sizes = (k * np.arange(5,n_slices+5)/1 + b).astype(int)
+#     kernel_sizes[kernel_sizes % 2 == 0] += 1  # Ensure odd kernel sizes
+#     #######################
+#     # Convert kernel sizes to corresponding sigmas
+#     sigmas = kernel_sizes / 2.5  # Adjust this scaling factor as needed   
+
+    sigmas = np.linspace(3.5e-7,2.5e-6,n_slices)
+    sigmas = 0.25*sigmas/(3.6*5e-6)*200
     blurred_cube = np.stack(
         [gaussian_filter(spectral_cube[j], 
                                        sigma=sigmas[j], 
                                        mode="mirror") for j in range(n_slices)], 
         axis=0
     ) 
-    return material_mask, spectral_cube, blurred_cube, labels
+
+    blurred_cube += np.random.randn(*blurred_cube.shape)*0.02
+
+    return material_mask,spectral_cube, blurred_cube, labels, zoomed_spectral_cube
 
 
 # ---- Worker Function ----
@@ -92,7 +120,7 @@ def simulator_worker(i, data_type, fake_spectra, run_forever):
 
     name = data_type
 
-    material_mask, spectral_cube, blurred_cube, label = simulator(image_size=16, fake_spectra=fake_spectra)
+    material_mask, spectral_cube, blurred_cube, label, zoomed_spectral_cube = simulator(image_size=50, fake_spectra=fake_spectra, camera_pos=[0,0,20])
 
     if run_forever:
         index = np.random.randint(0, 1000)
@@ -113,13 +141,13 @@ def simulator_worker(i, data_type, fake_spectra, run_forever):
     np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/mask/{index}.npy', material_mask)
     np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/blur_cube/{index}.npy', blurred_cube[0:50])
     np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/label/{index}.npy', label)
-    np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/spectral_cube/{index}.npy', spectral_cube[0:50])
+    np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/spectral_cube/{index}.npy', zoomed_spectral_cube)
 
     if run_forever == False:
         np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/mask/{index}.npy', material_mask)
         np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/blur_cube/{index}.npy', blurred_cube[0:50])
         np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/label/{index}.npy', label)
-        np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/spectral_cube/{index}.npy', spectral_cube[0:50])
+        np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/spectral_cube/{index}.npy', zoomed_spectral_cube)
 
 
 if __name__ == "__main__":
@@ -131,7 +159,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     data_type = 'Pristine'
-    num_spec = 1000
+    num_spec = 300
     fake_spectra = generate_fake_spectra(data_type=data_type,
                 material_path='/data/users2/yxiao11/model/satellite_project/material_spectral/',
                 num_spec=num_spec)

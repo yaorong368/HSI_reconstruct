@@ -8,7 +8,7 @@ import trimesh
 # import pyrender
 from scipy.spatial.transform import Rotation as R
 # from scipy.ndimage import gaussian_filter
-# import random
+import random
 
 
 # ------------------- UTILITY FUNCTIONS --------------------------
@@ -252,24 +252,25 @@ def create_spectral_cube(image_shape, material_mask, spectra):
 # -------------------- SATELLITE GENERATION ----------------------
 
 def make_satellite_with_ids(color_list, color_to_material):
-    color1_up = color_list[np.random.randint(0, 15)]
-    color1_mid = color_list[np.random.randint(15, 30)]
-    color1_down = color_list[np.random.randint(30, 45)]
-    color2 = color_list[np.random.randint(45, 60)]  # antenna
-    color3 = color_list[np.random.randint(60, 65)]  # connector
-    color4 = color_list[np.random.randint(65, len(color_list))]  # panel
-    # color1_up = color_list[0]
-    # color1_mid = color_list[1]
-    # color1_down = color_list[2]
-    # color2 = color_list[3]  # antenna
-    # color3 = color_list[4]  # connector
-    # color4 = color_list[5]  # panel
+    # color1_up = color_list[np.random.randint(0, 15)]
+    # color1_mid = color_list[np.random.randint(15, 30)]
+    # color1_down = color_list[np.random.randint(30, 45)]
+    # color2 = color_list[np.random.randint(45, 60)]  # antenna
+    # color3 = color_list[np.random.randint(60, 65)]  # connector
+    # color4 = color_list[np.random.randint(65, len(color_list))]  # panel
+    idx = np.random.choice(np.arange(71), 6, replace=False)
+    color1_up = color_list[idx[0]][:3] + [255]
+    color1_mid = color_list[idx[1]][:3] + [255]
+    color1_down = color_list[idx[2]][:3] + [255]
+    color2 = color_list[idx[3]][:3] + [255]  # antenna
+    color3 = color_list[idx[4]][:3] + [255]  # connector
+    color4 = color_list[idx[5]][:3] + [255]  # panel
 
-    color1_up = color1_up[:3] + [255]
-    color1_mid = color1_mid[:3] + [255]
-    color1_down = color1_down[:3] + [255]
-    color2 = color2[:3] + [255]
-    color4 = color4[:3] + [255]
+    # color1_up = color1_up[:3] + [255]
+    # color1_mid = color1_mid[:3] + [255]
+    # color1_down = color1_down[:3] + [255]
+    # color2 = color2[:3] + [255]
+    # color4 = color4[:3] + [255]
 
     components = []
 
@@ -302,17 +303,17 @@ def make_satellite_with_ids(color_list, color_to_material):
 
     # Connectors
     connector1 = trimesh.creation.box(extents=[1.0, 0.3, 0.3])
-    connector1.apply_translation([0.8 + 0.5, 0, 0])
+    connector1.apply_translation([1.0 + 0.5, 0, 0])
     connector2 = trimesh.creation.box(extents=[1.0, 0.3, 0.3])
-    connector2.apply_translation([-0.8 - 0.5, 0, 0])
+    connector2.apply_translation([-1.0 - 0.5, 0, 0])
     connectors = trimesh.util.concatenate([connector1, connector2])
     connectors.visual.vertex_colors = np.tile(color3, (len(connectors.vertices), 1))
     components.append((connectors, color_to_material[tuple(color3[:3])]))
 
     # Panels
-    panel1 = trimesh.creation.box(extents=[3.5, 0.01, 2.0])
+    panel1 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
     panel1.apply_translation([4.5, 0, 0])
-    panel2 = trimesh.creation.box(extents=[3.5, 0.01, 2.0])
+    panel2 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
     panel2.apply_translation([-4.5, 0, 0])
     solar_panels = trimesh.util.concatenate([panel1, panel2])
     solar_panels.visual.vertex_colors = np.tile(color4, (len(solar_panels.vertices), 1))
@@ -326,4 +327,148 @@ def make_satellite_with_ids(color_list, color_to_material):
 
     return satellite, components
 
+# def make_satellite_with_ids(color_list, color_to_material):
+#     # Sample colors
+#     # def sample_color(i, j):
+#     #     return color_list[np.random.randint(i, j)][:3] + [255]
 
+#     # color1_up = sample_color(0, 15)
+#     # color1_mid = sample_color(15, 30)
+#     # color1_down = sample_color(30, 45)
+#     # color2 = sample_color(45, 60)  # antenna
+#     # color3 = sample_color(60, 65)  # connector
+#     # color4 = sample_color(65, len(color_list))  # panel
+
+#     idx = np.random.choice(np.arange(71), 6, replace=False)
+#     color1_up = color_list[idx[0]][:3] + [255]
+#     color1_mid = color_list[idx[1]][:3] + [255]
+#     color1_down = color_list[idx[2]][:3] + [255]
+#     color2 = color_list[idx[3]][:3] + [255]  # antenna
+#     color3 = color_list[idx[4]][:3] + [255]  # connector
+#     color4 = color_list[idx[5]][:3] + [255]  # panel
+
+
+
+#     components = []
+
+#     h_total = random.uniform(2.0, 4.0)
+#     h_third = h_total / 3.0
+
+#     def apply_random_rotation(mesh):
+#         angles = np.radians(np.random.uniform(-30, 30, 3))
+#         rot_x = trimesh.transformations.rotation_matrix(angles[0], [1, 0, 0])
+#         rot_y = trimesh.transformations.rotation_matrix(angles[1], [0, 1, 0])
+#         rot_z = trimesh.transformations.rotation_matrix(angles[2], [0, 0, 1])
+#         mesh.apply_transform(rot_x @ rot_y @ rot_z)
+
+#     # Down part
+#     down_radius = random.uniform(0.6, 1.0)
+#     body_down = trimesh.creation.cylinder(radius=down_radius, height=h_third)
+#     body_down.apply_translation([0, 0, -h_total / 2 + h_third / 2])
+#     apply_random_rotation(body_down)
+#     body_down.visual.vertex_colors = np.tile(color1_down, (len(body_down.vertices), 1))
+#     components.append((body_down, color_to_material[tuple(color1_down[:3])]))
+
+#     # Mid part
+#     mid_shape = random.choice(['cylinder', 'box', 'cone', 'capsule', 'ellipsoid'])
+#     if mid_shape == 'cylinder':
+#         body_mid = trimesh.creation.cylinder(radius=random.uniform(0.6, 1.0), height=h_third)
+#     elif mid_shape == 'box':
+#         size = np.random.uniform(1.0, 1.6, 3)
+#         body_mid = trimesh.creation.box(extents=size)
+#     elif mid_shape == 'cone':
+#         body_mid = trimesh.creation.cone(radius=random.uniform(0.6, 1.0), height=h_third)
+#     elif mid_shape == 'capsule':
+#         body_mid = trimesh.creation.capsule(radius=random.uniform(0.5, 0.7), height=h_third)
+#     elif mid_shape == 'ellipsoid':
+#         sphere = trimesh.creation.icosphere(subdivisions=2, radius=1.0)
+#         scale = np.eye(4)
+#         scale[0, 0] = random.uniform(0.8, 1.2)
+#         scale[1, 1] = random.uniform(0.8, 1.2)
+#         scale[2, 2] = h_third
+#         sphere.apply_transform(scale)
+#         body_mid = sphere
+#     apply_random_rotation(body_mid)
+#     body_mid.visual.vertex_colors = np.tile(color1_mid, (len(body_mid.vertices), 1))
+#     components.append((body_mid, color_to_material[tuple(color1_mid[:3])]))
+
+#     # Up part
+#     up_shape = random.choice(['cylinder', 'sphere', 'cone', 'torus', 'box'])
+#     if up_shape == 'cylinder':
+#         body_up = trimesh.creation.cylinder(radius=random.uniform(0.6, 1.0), height=h_third)
+#     elif up_shape == 'sphere':
+#         body_up = trimesh.creation.icosphere(radius=random.uniform(0.6, 1.0))
+#     elif up_shape == 'cone':
+#         body_up = trimesh.creation.cone(radius=random.uniform(0.6, 1.0), height=h_third)
+#     elif up_shape == 'torus':
+#         body_up = trimesh.creation.torus(random.uniform(0.5, 0.8), random.uniform(0.1, 0.2))
+#     elif up_shape == 'box':
+#         size = np.random.uniform(0.8, 1.4, 3)
+#         body_up = trimesh.creation.box(extents=size)
+#     body_up.apply_translation([0, 0, h_total / 2 - h_third / 2])
+#     apply_random_rotation(body_up)
+#     body_up.visual.vertex_colors = np.tile(color1_up, (len(body_up.vertices), 1))
+#     components.append((body_up, color_to_material[tuple(color1_up[:3])]))
+
+#     # Antenna
+#     antenna_shape = random.choice(['icosphere', 'cylinder', 'cone', 'torus'])
+#     if antenna_shape == 'icosphere':
+#         antenna = trimesh.creation.icosphere(radius=random.uniform(0.3, 0.5))
+#     elif antenna_shape == 'cylinder':
+#         antenna = trimesh.creation.cylinder(radius=0.2, height=random.uniform(0.8, 1.2))
+#     elif antenna_shape == 'cone':
+#         antenna = trimesh.creation.cone(radius=0.3, height=random.uniform(0.6, 1.0))
+#     elif antenna_shape == 'torus':
+#         antenna = trimesh.creation.torus(random.uniform(0.2, 0.4), random.uniform(0.05, 0.15))
+#     antenna.apply_translation([0, 0, h_total / 2 + 1.0])
+#     apply_random_rotation(antenna)
+#     antenna.visual.vertex_colors = np.tile(color2, (len(antenna.vertices), 1))
+#     components.append((antenna, color_to_material[tuple(color2[:3])]))
+
+#     # Connectors
+#     connector_style = random.choice(['box', 'cylinder'])
+#     conn_length = random.uniform(1.5, 2.0)
+#     if connector_style == 'box':
+#         connector1 = trimesh.creation.box(extents=[conn_length, 0.5, 0.5])
+#         connector2 = trimesh.creation.box(extents=[conn_length, 0.5, 0.5])
+#     else:
+#         connector1 = trimesh.creation.cylinder(radius=0.15, height=conn_length)
+# #         connector1.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+#         connector2 = connector1.copy()
+#     connector1.apply_translation([conn_length / 2 + 1.0, 0, 0])
+#     connector2.apply_translation([-conn_length / 2 - 1.0, 0, 0])
+# #     apply_random_rotation(connector1)
+# #     apply_random_rotation(connector2)
+#     connectors = trimesh.util.concatenate([connector1, connector2])
+#     connectors.visual.vertex_colors = np.tile(color3, (len(connectors.vertices), 1))
+#     components.append((connectors, color_to_material[tuple(color3[:3])]))
+
+#     # Panels
+#     panel_style = random.choice(['standard', 'thin', 'angled'])
+#     if panel_style == 'standard':
+#         panel1 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
+#         panel2 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
+#     elif panel_style == 'thin':
+#         panel1 = trimesh.creation.box(extents=[3.0, 0.01, 1.0])
+#         panel2 = trimesh.creation.box(extents=[3.0, 0.01, 1.0])
+#     elif panel_style == 'angled':
+#         panel1 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
+#         panel2 = trimesh.creation.box(extents=[4.0, 0.01, 2.0])
+#         rot1 = trimesh.transformations.rotation_matrix(np.radians(random.uniform(10, 30)), [0, 1, 0])
+#         rot2 = trimesh.transformations.rotation_matrix(np.radians(random.uniform(-30, -10)), [0, 1, 0])
+#         panel1.apply_transform(rot1)
+#         panel2.apply_transform(rot2)
+#     panel1.apply_translation([random.uniform(4.0, 5.0), 0, 0])
+#     panel2.apply_translation([random.uniform(-5.0, -4.0), 0, 0])
+#     apply_random_rotation(panel1)
+#     apply_random_rotation(panel2)
+#     solar_panels = trimesh.util.concatenate([panel1, panel2])
+#     solar_panels.visual.vertex_colors = np.tile(color4, (len(solar_panels.vertices), 1))
+#     components.append((solar_panels, color_to_material[tuple(color4[:3])]))
+
+#     satellite = trimesh.util.concatenate([
+#         body_down, body_mid, body_up,
+#         antenna, connectors, solar_panels
+#     ])
+
+#     return satellite, components
