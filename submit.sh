@@ -6,7 +6,7 @@
 #SBATCH -p qTRD
 #SBATCH -t 24:00:00
 #SBATCH -J generator
-#SBATCH -A trends108c146
+#SBATCH -A ...
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=yxiao11@student.gsu.edu
 #SBATCH --output=/data/users2/yxiao11/model/satellite_project/generator.out
