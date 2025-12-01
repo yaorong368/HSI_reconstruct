@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import time
-import ica
+# import ica
 
 
 from moduler import *
@@ -13,7 +13,7 @@ from moduler import *
 
 torch.set_printoptions(sci_mode=False)
 
-def multiclass_dice_loss(preds, targets, num_classes=72, smooth=1e-5, weight=None):
+def multiclass_dice_loss(preds, targets, num_classes=17, smooth=1e-5, weight=None):
     preds = F.softmax(preds, dim=1)              # [B, C, H, W]
     targets_onehot = F.one_hot(targets, num_classes)  # [B, H, W, C]
     targets_onehot = targets_onehot.permute(0, 3, 1, 2).float()  # [B, C, H, W]
@@ -56,7 +56,7 @@ class FocalLoss(nn.Module):
         else:
             return focal_loss
 
-def safe_load_numpy(file_path, retries=100, wait=0.1):
+def safe_load_numpy(file_path, retries=1000, wait=0.1):
     for attempt in range(retries):
         try:
             data = np.load(file_path)   # Attempt to load
@@ -105,28 +105,59 @@ class get_dataset(Dataset):
         ipt = safe_load_numpy(self.data_dir[idx])
         # ipt = (ipt - ipt.mean(axis=(1,2), keepdims=True)) / (ipt.std(axis=(1,2), keepdims=True)+ 1e-8)
         ipt = torch.from_numpy(ipt)
-        # ipt,_,_ = ica.pca_whiten(ipt.reshape(100,-1), 10)
-        # ipt = torch.from_numpy(ipt.reshape(10,32,32))
 
         tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx]))
-        # one_hot = F.one_hot(tgt, num_classes=72)
-        # one_hot = one_hot.permute(0, 3, 1, 2).float()
-
-
-        # tgt = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])[None,:])
-        # tgt = (tgt - tgt.mean(axis=(1,2), keepdims=True)) / (tgt.std(axis=(1,2), keepdims=True)+ 1e-8)
-
-
-        # label_index = torch.from_numpy(safe_load_numpy(self.labels_dir[idx])).long()
-        # label = torch.zeros(71)
-        # label[label_index] = 1
-
-        # label = torch.tensor([0, 1]).repeat(71, 1)
-        # label[label_index] = torch.tensor([1, 0])
-
-
+        # tgt = (tgt - tgt.mean(dim=0, keepdim=True)) / (tgt.std(dim=0, keepdim=True, unbiased=False).clamp_min(1e-8))
+        # tgt = (tgt != 0).to(tgt.dtype)
+       
         
         return ipt.float(), tgt.long()
+    
+def dice_loss(pred, target, eps=1e-6):
+    pred = pred.contiguous().view(-1)
+    target = target.contiguous().view(-1)
+    inter = (pred * target).sum()
+    return 1 - (2*inter + eps) / (pred.sum() + target.sum() + eps)
+
+def channel_correlation_loss(pred, target, eps=1e-8):
+    """
+    pred, target: [B, C, H, W]
+    Computes 1 - mean Pearson correlation per channel map.
+    """
+    B, C, H, W = pred.shape
+
+    # flatten spatial dims → [B, C, H*W]
+    pred_flat = pred.view(B, C, -1)
+    target_flat = target.view(B, C, -1)
+
+    # subtract mean (per batch, per channel)
+    pred_centered = pred_flat - pred_flat.mean(dim=2, keepdim=True)
+    target_centered = target_flat - target_flat.mean(dim=2, keepdim=True)
+
+    # numerator: covariance
+    num = (pred_centered * target_centered).sum(dim=2)
+
+    # denominator: product of stds
+    denom = torch.sqrt((pred_centered**2).sum(dim=2) * (target_centered**2).sum(dim=2) + eps)
+
+    corr = num / denom  # [B, C] correlation per channel
+    loss = 1 - corr.mean()  # 1 - mean correlation
+
+    return loss
+
+def spectral_angle_loss(pred, target, eps=1e-8):
+    # pred,target: [B,C,H,W]
+    dot = (pred * target).sum(dim=1)          # [B,H,W]
+    npred = torch.norm(pred,   dim=1) + eps
+    ntarg = torch.norm(target, dim=1) + eps
+    cos = dot / (npred * ntarg)
+    return (1 - cos).mean()                   # (1 - cos θ)
+
+def hsi_sr_loss(pred, target, alpha=1.0, beta=0.1):
+    # L1 保边 + SAM 保光谱形状
+    return alpha * F.l1_loss(pred, target) + beta * spectral_angle_loss(pred, target)
+
+
     
 if __name__ == "__main__":
 #--------set data
@@ -135,8 +166,8 @@ if __name__ == "__main__":
     # data_type = 'Irradiated'
 
     blur_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/blur_cube/'
-    label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/spectral_cube/'
-    # label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/label/'
+    label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/mask/'
+    # label_dir = '/data/users2/yxiao11/model/satellite_project/database/' +data_type + '/spectral_cube/'
 
     data_file = []
     label_file = []
@@ -162,50 +193,23 @@ if __name__ == "__main__":
     batch_size = 30
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
    
-    # model = model = DeepLSTMTemporalEncoder(
-    #     input_dim=20,          # e.g. 8
-    #     hidden_dim=128,
-    #     num_classes=71,
-    #     num_layers=5,
-    #     dropout=0.5
-    #     ).to(device)
-    # model = SpectralCubeNetV2(in_channels=20, num_classes=71).to(device)
-    # model = CubeModel(50,71,input_size=16).to(device)
-    # model = HSIReconstructor(in_channels=20, num_classes=24).to(device)
-    # model = HSIReconstructor(in_channels=20, num_classes=72).to(device)
-    # model = HSIReconstructor(in_channels=40, num_classes=72).to(device)
-    model = SpectralSpatialHSIModel(in_channels=50, num_classes=72).to(device)
-    
+
+    model = SpectralSpatialHSIModel(in_channels=36, num_classes=47).to(device)
+    # model = HSI_SuperUNet(in_channels=18).to(device)
+    # model = HSI_RestorationUNet(18).to(device)
+    # model = HSIReconstructor(in_channels=36, num_classes=47).to(device)
+    # model= SequentialPatchViTForSegmentation(C=36, num_class=47,H=16,W=16,p=4).to(device)
 
     loader = DataLoader(my_dataset, batch_size=batch_size, shuffle=True)
     # criterion = torch.nn.CrossEntropyLoss()
 
-    # lb_list = []
-    # for file in label_file:
-    #     label_index = torch.from_numpy(safe_load_numpy(file)).long()
-    #     label = torch.tensor([0, 1]).repeat(71, 1)
-    #     label[label_index] = torch.tensor([1, 0])
-    #     lb_list.append(label.unsqueeze(0))
-
-    # criterion = torch.nn.BCEWithLogitsLoss(
-    #     pos_weight = compute_pos_weight_from_two_hot(torch.cat(lb_list,0)).to(device)
-    # )
-
+ 
+    # Use with CrossEntropyLoss
+    criterion = nn.CrossEntropyLoss()
     # criterion = nn.BCEWithLogitsLoss()
-    # criterion = torch.nn.BCEWithLogitsLoss(pos_weight = torch.tensor([20.0]).to(device))  
-    # criterion = nn.MSELoss()
-      
-    # weights = torch.ones(24)
-    # weights[0] = 0.5
+    # criterion = FocalLoss(gamma=2.0)
+    # criterion = nn.L1Loss()
 
-    # # Move to correct device (GPU or CPU)
-    # weights = weights.to(device)
-
-    # # Use with CrossEntropyLoss
-    # criterion = nn.CrossEntropyLoss(weight=weights)
-    criterion = FocalLoss(gamma=2.0)
-
-    # criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-6)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
 
@@ -224,6 +228,7 @@ if __name__ == "__main__":
         model.train()
         running_loss = 0.0
 
+
         for cube, labels in loader:
             cube, labels = cube.to(device), labels.to(device)
 
@@ -231,18 +236,15 @@ if __name__ == "__main__":
             optimizer.zero_grad()
             
             # Forward pass
-            outputs = model(cube)
-            # loss = criterion(outputs, labels)
-            loss = hybrid_loss(outputs, labels)
+            # output= model(cube)
 
-            # Encourage at most 3 strong activations
-            # prob = torch.sigmoid(outputs)  # [B, 71]
-            # mask = (prob > 0.5).float()    # 1 for values > 0.5, else 0
-            # activation_penalty = (prob * mask).sum(dim=1).clamp(min=0)  # total "active units" per sample
-            # activation_penalty = ((activation_penalty - 3).clamp(min=0)) ** 2  # penalize > 3 active units
-            # activation_penalty = activation_penalty.mean()
+            output = model(cube)
 
-            # loss = bce_loss + 0.05 * activation_penalty
+   
+            loss = criterion(output, labels) 
+            # loss = dice_loss(output, labels)
+
+            # loss = hsi_sr_loss(output, labels)
 
             
             # Backward pass and optimization
@@ -252,11 +254,7 @@ if __name__ == "__main__":
 
             
             running_loss += loss.item()
-        # # learning rate update
-        # if iteration % step_size == 0:
-        #     for param_group in optimizer.param_groups:
-        #         param_group['lr'] *= lr_decay_factor
-        #     print(f"Iteration {iteration}: Learning rate updated to {optimizer.param_groups[0]['lr']:.6f}")
+
 
         avg_train_loss = running_loss / len(loader)
         my_loss.append(avg_train_loss)

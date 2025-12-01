@@ -1,10 +1,10 @@
 import numpy as np
 import os
 import time
-import ica
+# import ica
 
-from scipy.spatial.transform import Rotation as R
-from scipy.ndimage import gaussian_filter
+# from scipy.spatial.transform import Rotation as R
+# from scipy.ndimage import gaussian_filter
 from functools import partial
 
 import numpy as np
@@ -38,89 +38,19 @@ def compute_sigma_pixels(wavelength_nm, D_m=3.6, pixel_um=10, focal_length_m=100
     sigma_pixels = theta_arcsec / plate_scale
     return sigma_pixels
 
-# -------------------- SAMPLE GENERATION FUNCTION ------------------
-
-def generate_sample(fake_spectra, image_size=256, camera_pos=[0,0,20]):
-    
-    
-    
-    # fake_spectra = generate_fake_spectra(data_type=data_type,
-    #                                      material_path = material_path,
-    #                                      num_spec=num_spec)
-    
-    color_list, color_to_material = generate_distinct_color_list(len(fake_spectra))
-    
-    _, components = make_satellite_with_ids(color_list, color_to_material)
-    
-    # angles = np.random.randint(0, 360, 3)
-    angles = np.array([90., 0., 0.])
-    # angles = np.array([0., 0., 0.])
-    angles[0] = np.random.uniform(-90,90,1)
-    angles[1] = np.random.uniform(-90,90,1)
-    angles[2] = np.random.uniform(-90,90,1)
-    # angles[0] = np.random.randint(55,125,1)
-    # angles[1] = np.random.randint(-60,60,1)
-    # angles[2] = np.random.randint(-30,30,1)
-    material_mask = rasterize_components_with_depth(
-        components, image_size=image_size, camera_pos=camera_pos, angles=angles)
-    
-    spectral_cube, labels = create_spectral_cube((image_size, image_size), material_mask, fake_spectra)
-    
-    zoomed_material_mask = rasterize_components_with_depth(
-        components, image_size=image_size, camera_pos=[0,0,20], angles=angles)
-    
-    # zoomed_spectral_cube, _ = create_spectral_cube((128, 128), zoomed_material_mask, fake_spectra)
-
-    return material_mask,spectral_cube, labels, zoomed_material_mask
-
-def simulator(image_size, fake_spectra, camera_pos=[0,0,30]):
-    
-    material_mask,spectral_cube, labels, zoomed_spectral_cube = generate_sample(
-        fake_spectra,
-        # material_path = '/data/users2/yxiao11/model/satellite_project/material_spectral',
-        image_size=image_size, 
-        # data_type=data_type, 
-        # num_spec=num_spec, 
-        camera_pos=camera_pos
-    )
-    #######################
-#     # Generate random k and b for each sample
-#     k = np.random.uniform(0.7, 1.2)  # Example range for k
-#     b = np.random.uniform(1, 3)      # Example range for b
-    n_slices = spectral_cube.shape[0]
-#     # Compute kernel sizes based on the linear formula
-#     kernel_sizes = (k * np.arange(5,n_slices+5)/1 + b).astype(int)
-#     kernel_sizes[kernel_sizes % 2 == 0] += 1  # Ensure odd kernel sizes
-#     #######################
-#     # Convert kernel sizes to corresponding sigmas
-#     sigmas = kernel_sizes / 2.5  # Adjust this scaling factor as needed   
-
-    sigmas = np.linspace(3.5e-7,2.5e-6,n_slices)
-    sigmas = 0.25*sigmas/(3.6*5e-6)*200
-    blurred_cube = np.stack(
-        [gaussian_filter(spectral_cube[j], 
-                                       sigma=sigmas[j], 
-                                       mode="mirror") for j in range(n_slices)], 
-        axis=0
-    ) 
-
-    blurred_cube += np.random.randn(*blurred_cube.shape)*0.02
-
-    return material_mask,spectral_cube, blurred_cube, labels, zoomed_spectral_cube
-
 
 # ---- Worker Function ----
 # Get unique job ID from Slurm
 
 
-def simulator_worker(i, data_type, fake_spectra, run_forever):
+def simulator_worker(i, num_spectrum, data_type, fake_material, run_forever):
     # Reseed numpy RNG with a unique seed
     seed = (int(time.time() * 1e6) + os.getpid() + i) % (2**32 - 1)
     np.random.seed(seed)
 
     name = data_type
 
-    material_mask, spectral_cube, blurred_cube, label, zoomed_spectral_cube = simulator(image_size=50, fake_spectra=fake_spectra, camera_pos=[0,0,20])
+    
 
     if run_forever:
         index = np.random.randint(0, 1000)
@@ -130,23 +60,48 @@ def simulator_worker(i, data_type, fake_spectra, run_forever):
         index = i
         print(f"Process {os.getpid()} - Iteration {i} - Index {index}")
 
+    # std = np.random.uniform(0.05,0.08)
+    # image_size = np.random.choice([16,32])
+    # height = np.random.choice([10,15,16,17,20,21,22,30])
+    image_size=15
+    height=17 # camera position
+    zoom_level=1
+    std = 0.01
+    
+    if index < 10000:
+        material_mask, spectral_cube, blurred_cube, label, zoomed_spectral_cube = simulator(num_spectrum, 
+                                                                                            image_size=image_size, 
+                                                                                            fake_material=fake_material, 
+                                                                                            camera_pos=[0,0,height],
+                                                                                            noise_std=std,
+                                                                                            zoom_level=zoom_level)
+    elif index < 600:
+        material_mask, zoomed_spectral_cube, blurred_cube = shape_simulator(fake_material,
+                                                                            size=image_size,
+                                                                            num_channels=num_spectrum, 
+                                                                            noise_std=std,
+                                                                            zoom=zoom_level)
+    else:
+        material_mask, zoomed_spectral_cube, blurred_cube = shape_simulator2(fake_material,
+                                                                            size=image_size,
+                                                                            num_channels=num_spectrum, 
+                                                                            noise_std=std,
+                                                                            num_patches=(12,15),
+                                                                            zoom=zoom_level)
+
     # Save the data
 
-
-    # ###pca trhough spectral dim
-    # nb = blurred_cube.reshape(num_spec,-1).T
-    # blurred_cube,_,_ = ica.pca_whiten(nb, 50)
     # ###----------------------
 
     np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/mask/{index}.npy', material_mask)
-    np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/blur_cube/{index}.npy', blurred_cube[0:50])
-    np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/label/{index}.npy', label)
+    np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/blur_cube/{index}.npy', blurred_cube)
+    # np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/label/{index}.npy', label)
     np.save(f'/data/users2/yxiao11/model/satellite_project/database/{name}/spectral_cube/{index}.npy', zoomed_spectral_cube)
 
     if run_forever == False:
         np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/mask/{index}.npy', material_mask)
-        np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/blur_cube/{index}.npy', blurred_cube[0:50])
-        np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/label/{index}.npy', label)
+        np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/blur_cube/{index}.npy', blurred_cube)
+        # np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/label/{index}.npy', label)
         np.save(f'/data/users2/yxiao11/model/satellite_project/data/{name}/spectral_cube/{index}.npy', zoomed_spectral_cube)
 
 
@@ -159,28 +114,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     data_type = 'Pristine'
-    num_spec = 300
-    fake_spectra = generate_fake_spectra(data_type=data_type,
-                material_path='/data/users2/yxiao11/model/satellite_project/material_spectral/',
-                num_spec=num_spec)
+    num_spec = 36
+    fake_material = generate_material(n=num_spec,
+                # material_path='/data/users2/yxiao11/model/satellite_project/material_spectral/',
+                end=1000)
     
-    ####---sort spectral for convience
-    # Original list of keys (sorted numerically)
-    ids = sorted(fake_spectra.keys())
 
-    # Spectra matrix: shape (71, num_bands)
-    spectra_matrix = np.stack([fake_spectra[i] for i in ids], axis=0)
-
-    # Correlation matrix + sorting
-    corr_matrix = np.abs(np.corrcoef(spectra_matrix))
-    corr_strength = corr_matrix.sum(axis=1)
-    sorted_indices = np.argsort(-corr_strength)  # Descending
-
-    # Reorder original keys by correlation dominance
-    sorted_keys = [ids[i] for i in sorted_indices]
-    sorted_fake_spectra = {new_idx+1: fake_spectra[old_key] for new_idx, old_key in enumerate(sorted_keys)}
-
-    fake_spectra = sorted_fake_spectra
     ###---------------
 
 
@@ -191,7 +130,7 @@ if __name__ == "__main__":
     job_id = os.getpid()
     print(f"Job {job_id} starting with {num_processes} processes")
 
-    worker_func = partial(simulator_worker, data_type=data_type, fake_spectra=fake_spectra, run_forever=run_forever)
+    worker_func = partial(simulator_worker, num_spectrum=num_spec, data_type=data_type, fake_material=fake_material, run_forever=run_forever)
 
     if run_forever:
         def infinite_worker(index_start):
